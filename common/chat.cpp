@@ -592,6 +592,7 @@ const char * common_chat_format_name(common_chat_format format) {
         case COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1: return "Functionary v3.1 Llama 3.1";
         case COMMON_CHAT_FORMAT_HERMES_2_PRO: return "Hermes 2 Pro";
         case COMMON_CHAT_FORMAT_COMMAND_R7B: return "Command R7B";
+        case COMMON_CHAT_FORMAT_QWEN3_CODER_XML: return "Qwen3 Coder XML";
         default:
             throw std::runtime_error("Unknown chat format");
     }
@@ -872,6 +873,26 @@ static void common_chat_parse_generic(common_chat_msg_parser & builder) {
     } else {
         throw common_chat_msg_partial_exception("Expected 'tool_call', 'tool_calls' or 'response' in JSON");
     }
+}
+
+static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
+
+    std::string content = builder.consume_rest();
+    
+    // Try to parse Qwen3-Coder XML format
+    // For now, use empty tools vector - we'll need to pass tools differently
+    std::vector<common_chat_tool> empty_tools;
+    if (builder.parse_qwen3_xml_tool_call(content, empty_tools)) {
+        // Successfully parsed XML tool call
+        return;
+    }
+    
+    // If no tool call found, treat as regular content
+    builder.add_content(content);
 }
 
 static common_chat_params common_chat_params_init_mistral_nemo(const common_chat_template & tmpl, const struct templates_params & inputs) {
@@ -1700,6 +1721,80 @@ static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
     }
 }
 
+static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_template & tmpl, const struct templates_params & inputs) {
+    common_chat_params data;
+    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+    
+    // Always set the format to QWEN3_CODER_XML regardless of whether tools are provided
+    // The format identifies the template type, not the runtime configuration
+    data.format = COMMON_CHAT_FORMAT_QWEN3_CODER_XML;
+    
+    if (!inputs.tools.empty()) {
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            std::vector<std::string> tool_rules;
+            std::vector<std::string> escaped_names;
+            
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                const std::string & name = function.at("name");
+                const json & parameters = function.at("parameters");
+                
+                escaped_names.push_back(regex_escape(name));
+                
+                // Build parameter rules for XML format
+                std::vector<std::string> param_rules;
+                if (parameters.contains("properties")) {
+                    for (const auto & [param_name, param_schema] : parameters["properties"].items()) {
+                        std::string param_rule = "\"<parameter=" + param_name + ">\" space ";
+                        
+                        // Add parameter value based on type
+                        if (param_schema.contains("type")) {
+                            std::string param_type = param_schema["type"];
+                            if (param_type == "string") {
+                                param_rule += "[^<]* ";
+                            } else if (param_type == "integer" || param_type == "number") {
+                                param_rule += "[0-9.-]+ ";
+                            } else if (param_type == "boolean") {
+                                param_rule += "(\"true\" | \"false\") ";
+                            } else {
+                                param_rule += "[^<]* ";
+                            }
+                        } else {
+                            param_rule += "[^<]* ";
+                        }
+                        
+                        param_rule += "\"</parameter>\" space";
+                        param_rules.push_back(param_rule);
+                    }
+                }
+                
+                std::string function_content = param_rules.empty() ? "space" : string_join(param_rules, " ");
+                tool_rules.push_back(builder.add_rule(name + "-call",
+                    "\"<tool_call>\" space \"<function=" + name + ">\" space " +
+                    function_content + " \"</function>\" space \"</tool_call>\" space"));
+            });
+            
+            auto tool_call = builder.add_rule("tool_call", string_join(tool_rules, " | "));
+            builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
+            
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
+        });
+        
+        data.preserved_tokens = {
+            "<tool_call>",
+            "</tool_call>",
+            "<function=",
+            "</function>",
+            "<parameter=",
+            "</parameter>",
+        };
+    }
+    
+    data.prompt = apply(tmpl, inputs);
+    return data;
+}
+
 static common_chat_params common_chat_params_init_without_tools(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
     data.prompt = apply(tmpl, inputs);
@@ -1769,6 +1864,13 @@ static common_chat_params common_chat_templates_apply_jinja(
         return common_chat_params_init_command_r7b(tmpl, params);
     }
 
+    // Qwen3-Coder XML format detection (must come before Hermes 2 Pro)
+    // Look for unique patterns that distinguish Qwen3-Coder from other formats
+    if (src.find("Function calls MUST follow the specified format") != std::string::npos ||
+        src.find("<function=...></function> block must be nested within <tool_call></tool_call>") != std::string::npos) {
+        return common_chat_params_init_qwen3_coder_xml(tmpl, params);
+    }
+
     // Hermes 2/3 Pro, Qwen 2.5 Instruct (w/ tools)
     if (src.find("<tool_call>") != std::string::npos && params.json_schema.is_null()) {
         return common_chat_params_init_hermes_2_pro(tmpl, params);
@@ -1811,6 +1913,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     if (src.find("[TOOL_CALLS]") != std::string::npos) {
         return common_chat_params_init_mistral_nemo(tmpl, params);
     }
+
 
     // Generic fallback
     return common_chat_params_init_generic(tmpl, params);
@@ -1924,6 +2027,9 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
             break;
         case COMMON_CHAT_FORMAT_COMMAND_R7B:
             common_chat_parse_command_r7b(builder);
+            break;
+        case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
+            common_chat_parse_qwen3_coder_xml(builder);
             break;
         default:
             throw std::runtime_error(std::string("Unsupported format: ") + common_chat_format_name(builder.syntax().format));
