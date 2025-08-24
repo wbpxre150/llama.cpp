@@ -920,25 +920,6 @@ static void common_chat_parse_generic(common_chat_msg_parser & builder) {
     }
 }
 
-static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) {
-    if (!builder.syntax().parse_tool_calls) {
-        builder.add_content(builder.consume_rest());
-        return;
-    }
-
-    std::string content = builder.consume_rest();
-
-    // Try to parse Qwen3-Coder XML format
-    // For now, use empty tools vector - we'll need to pass tools differently
-    std::vector<common_chat_tool> empty_tools;
-    if (builder.parse_qwen3_xml_tool_call(content, empty_tools)) {
-        // Successfully parsed XML tool call
-        return;
-    }
-    // If no tool call found, treat as regular content
-    builder.add_content(content);
-}
-
 static common_chat_params common_chat_params_init_mistral_nemo(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
@@ -2241,6 +2222,25 @@ static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_c
 
     data.prompt = apply(tmpl, inputs);
     return data;
+}
+
+static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
+
+    std::string content = builder.consume_rest();
+
+    // Try to parse Qwen3-Coder XML format
+    // For now, use empty tools vector - we'll need to pass tools differently
+    std::vector<common_chat_tool> empty_tools;
+    if (builder.parse_qwen3_xml_tool_call(content, empty_tools)) {
+        // Successfully parsed XML tool call
+        return;
+    }
+    // If no tool call found, treat as regular content
+    builder.add_content(content);
 }
 
 static common_chat_params common_chat_params_init_without_tools(const common_chat_template & tmpl, const struct templates_params & inputs) {
