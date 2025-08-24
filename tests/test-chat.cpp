@@ -2034,7 +2034,8 @@ static void test_template_output_parsers() {
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
         printf("✅ All Qwen3-Coder XML error handling and edge case tests passed!\n");
-
+    }
+    
     {
         auto tmpls = read_templates("models/templates/ibm-granite-granite-3.3-2B-Instruct.jinja");
         std::vector<std::string> end_tokens{ "<|end_of_text|>" };
@@ -2269,7 +2270,6 @@ static void test_template_output_parsers() {
                     /* .format = */ COMMON_CHAT_FORMAT_GPT_OSS,
                     /* .reasoning_format = */ COMMON_REASONING_FORMAT_AUTO,
                 }));
-    }
     }
 }
 

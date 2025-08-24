@@ -931,7 +931,12 @@ static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) 
     // For now, use empty tools vector - we'll need to pass tools differently
     std::vector<common_chat_tool> empty_tools;
     if (builder.parse_qwen3_xml_tool_call(content, empty_tools)) {
-        // Successfully parsed XML tool call
+        // Only treat as parsed if at least one tool call was actually added.
+        // On malformed or incomplete XML, fall back to plain content.
+        const auto & parsed = builder.result();
+        if (parsed.tool_calls.empty() && parsed.content.empty()) {
+            builder.add_content(content);
+        }
         return;
     }
 
@@ -2237,9 +2242,11 @@ static common_chat_params common_chat_templates_apply_jinja(
     }
 
     // Qwen3-Coder XML format detection (must come before Hermes 2 Pro)
-    // Look for unique patterns that distinguish Qwen3-Coder from other formats
-    if (src.find("Function calls MUST follow the specified format") != std::string::npos ||
-        src.find("<function=...></function> block must be nested within <tool_call></tool_call>") != std::string::npos) {
+    // Detect via explicit XML markers unique to Qwen3-Coder to avoid false positives in other templates.
+    // Require presence of <tool_call>, <function=...>, and <parameter=...> blocks.
+    if (src.find("<tool_call>") != std::string::npos &&
+        src.find("<function=") != std::string::npos &&
+        src.find("<parameter=") != std::string::npos) {
         return common_chat_params_init_qwen3_coder_xml(tmpl, params);
     }
 
