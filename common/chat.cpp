@@ -2121,7 +2121,7 @@ static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_c
                         if (param_schema.contains("type")) {
                             std::string param_type = param_schema["type"];
                             if (param_type == "string") {
-                                param_rule += not_parameter_end + " ";
+                                param_rule += not_parameter_end;
                             } else {
                                 param_rule += builder.add_schema(name + "-parameter-" + param_name, param_schema);
                             }
