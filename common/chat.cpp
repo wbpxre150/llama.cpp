@@ -2097,7 +2097,8 @@ static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_c
             foreach_function(inputs.tools, [&](const json & tool) {
                 const auto & function = tool.at("function");
                 const std::string & name = function.at("name");
-                const json & parameters = function.at("parameters");
+                auto parameters = function.at("parameters");
+                builder.resolve_refs(parameters);
 
                 std::unordered_set<std::string> required;
                 if (parameters.contains("required")) {
@@ -2112,16 +2113,93 @@ static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_c
                     for (const auto & [param_name, param_schema] : parameters["properties"].items()) {
                         std::string param_rule = "\"<parameter=" + param_name + ">\" space ";
 
-                        // Add parameter value based on type
-                        if (param_schema.contains("type")) {
-                            std::string param_type = param_schema["type"];
-                            if (param_type == "string") {
-                                param_rule += not_parameter_end;
-                            } else {
-                                param_rule += builder.add_schema(name + "-parameter-" + param_name, param_schema);
+                        // Add parameter value based on type (supports unions and anyOf/oneOf; sanitize unsupported {"not":{}} branches)
+                        auto schema_local = param_schema;
+
+                        // Recursively remove entries like {"not":{}} inside anyOf/oneOf that json-schema-to-grammar doesn't support
+                        std::function<void(json &)> sanitize = [&](json &s) {
+                            if (s.is_object()) {
+                                if (s.contains("anyOf") && s["anyOf"].is_array()) {
+                                    json filtered = json::array();
+                                    for (auto v : s["anyOf"]) {
+                                        if (v.is_object() && v.contains("not") && v["not"].is_object() && v["not"].empty()) {
+                                            continue;
+                                        }
+                                        sanitize(v);
+                                        filtered.push_back(v);
+                                    }
+                                    s["anyOf"] = filtered;
+                                    if (s["anyOf"].size() == 1) {
+                                        json single = s["anyOf"][0];
+                                        s.erase("anyOf");
+                                        for (auto it = single.begin(); it != single.end(); ++it) {
+                                            s[it.key()] = it.value();
+                                        }
+                                    }
+                                }
+                                if (s.contains("oneOf") && s["oneOf"].is_array()) {
+                                    json filtered = json::array();
+                                    for (auto v : s["oneOf"]) {
+                                        if (v.is_object() && v.contains("not") && v["not"].is_object() && v["not"].empty()) {
+                                            continue;
+                                        }
+                                        sanitize(v);
+                                        filtered.push_back(v);
+                                    }
+                                    s["oneOf"] = filtered;
+                                    if (s["oneOf"].size() == 1) {
+                                        json single = s["oneOf"][0];
+                                        s.erase("oneOf");
+                                        for (auto it = single.begin(); it != single.end(); ++it) {
+                                            s[it.key()] = it.value();
+                                        }
+                                    }
+                                }
+                                for (auto it = s.begin(); it != s.end(); ++it) {
+                                    sanitize(it.value());
+                                }
+                            } else if (s.is_array()) {
+                                for (auto & v : s) sanitize(v);
                             }
+                        };
+                        sanitize(schema_local);
+
+                        // Determine if schema allows a plain string (so we can accept unquoted text content in XML)
+                        std::function<bool(const json &)> allows_string = [&](const json & sch) -> bool {
+                            if (!sch.is_object()) return false;
+                            if (sch.contains("type")) {
+                                const auto & t = sch.at("type");
+                                if (t.is_string()) {
+                                    std::string ts = t;
+                                    return ts == "string" || ts == "text" || ts == "str";
+                                }
+                                if (t.is_array()) {
+                                    for (const auto & tv : t) {
+                                        if (tv.is_string() && (tv == "string" || tv == "text" || tv == "str")) {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                            if (sch.contains("anyOf") && sch["anyOf"].is_array()) {
+                                for (const auto & v : sch["anyOf"]) {
+                                    if (allows_string(v)) return true;
+                                }
+                            }
+                            if (sch.contains("oneOf") && sch["oneOf"].is_array()) {
+                                for (const auto & v : sch["oneOf"]) {
+                                    if (allows_string(v)) return true;
+                                }
+                            }
+                            return false;
+                        };
+
+                        if (allows_string(schema_local)) {
+                            // For string-accepting schemas, keep freeform XML text (no JSON quoting)
+                            param_rule += not_parameter_end;
                         } else {
-                            param_rule += builder.add_schema(name + "-parameter-" + param_name, param_schema);
+                            // For non-strings (object/array/number/boolean/null), expect JSON per schema
+                            param_rule += builder.add_schema(name + "-parameter-" + param_name, schema_local);
                         }
 
                         param_rule += "\"</parameter>\" space";

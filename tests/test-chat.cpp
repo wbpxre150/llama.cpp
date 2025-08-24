@@ -2023,6 +2023,37 @@ static void test_template_output_parsers() {
         
         printf("✅ All Qwen3-Coder XML error handling and edge case tests passed!\n");
     }
+    {
+        // Qwen3-Coder template: ensure grammar builds with union types and unsupported {"not": {}} branches
+        auto tmpls = read_templates("models/templates/Qwen3-Coder.jinja");
+        common_chat_templates_inputs inputs;
+        inputs.messages = { message_user };
+
+        common_chat_tool qwen_union_tool {
+            /* .name = */ "qwen_union",
+            /* .description = */ "Test tool for union/anyOf handling",
+            /* .parameters = */ R"({
+                "type": "object",
+                "properties": {
+                    "priority": { "type": ["number", "null"] },
+                    "maybe_text": { "anyOf": [ { "not": {} }, { "type": "string" } ] },
+                    "config": { "anyOf": [ { "type": "object" }, { "type": "null" } ] }
+                },
+                "required": []
+            })",
+        };
+        inputs.tools = { qwen_union_tool };
+
+        auto params = common_chat_templates_apply(tmpls.get(), inputs);
+        assert_equals(COMMON_CHAT_FORMAT_QWEN3_CODER_XML, params.format);
+        assert_equals(false, params.grammar.empty());
+
+        // Grammar should compile successfully
+        auto grammar = build_grammar(params.grammar);
+        if (!grammar) {
+            throw std::runtime_error("Failed to build Qwen3-Coder grammar with union types");
+        }
+    }
     
     {
         auto tmpls = read_templates("models/templates/ibm-granite-granite-3.3-2B-Instruct.jinja");

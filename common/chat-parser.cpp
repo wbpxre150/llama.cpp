@@ -649,44 +649,106 @@ namespace {
 
         // If we have schema information, use it
         if (param_config.contains(param_name)) {
-            std::string param_type = "string";
-            if (param_config[param_name].contains("type")) {
-                param_type = param_config[param_name]["type"];
-            }
-
-            // Convert based on type
-            if (param_type == "string" || param_type == "str" || param_type == "text") {
-                // SECURITY FIX: Use nlohmann::json for proper escaping instead of manual concatenation
-                return json(trimmed_value).dump();
-            } else if (param_type == "integer" || param_type == "int") {
-                int int_val;
-                if (safe_parse_int(trimmed_value, int_val)) {
-                    return std::to_string(int_val);
-                } else {
-                    // SECURITY FIX: Use proper JSON escaping for fallback string
-                    return json(trimmed_value).dump();
+            const auto & schema = param_config.at(std::string(param_name));
+            if (schema.contains("type")) {
+                const auto & t = schema.at("type");
+                // Handle union types like ["number","null"]
+                if (t.is_array()) {
+                    std::vector<std::string> types;
+                    for (const auto & tv : t) {
+                        if (tv.is_string()) {
+                            types.push_back((std::string) tv);
+                        }
+                    }
+                    auto list_contains = [&](const char * s) {
+                        for (const auto & x : types) {
+                            if (x == s) return true;
+                        }
+                        return false;
+                    };
+                    auto has = [&](std::string_view ty) {
+                        for (const auto & s : types) {
+                            if (s == ty) return true;
+                        }
+                        // Back-compat synonyms
+                        if (ty == "string")  return list_contains("str") || list_contains("text");
+                        if (ty == "integer") return list_contains("int");
+                        if (ty == "number")  return list_contains("float");
+                        if (ty == "boolean") return list_contains("bool");
+                        return false;
+                    };
+                    if (has("null") && trimmed_value == "null") {
+                        return "null";
+                    }
+                    if (has("object") || has("array")) {
+                        try {
+                            auto parsed = json::parse(trimmed_value);
+                            return parsed.dump();
+                        } catch (...) {
+                            return json(trimmed_value).dump();
+                        }
+                    }
+                    if (has("integer")) {
+                        int int_val;
+                        if (safe_parse_int(trimmed_value, int_val)) {
+                            return std::to_string(int_val);
+                        }
+                        // if integer parse fails, try number or fall through
+                    }
+                    if (has("number")) {
+                        float float_val;
+                        if (safe_parse_float(trimmed_value, float_val)) {
+                            return std::to_string(float_val);
+                        }
+                    }
+                    if (has("boolean")) {
+                        if (trimmed_value == "true" || trimmed_value == "false") {
+                            return trimmed_value;
+                        }
+                        return "false";
+                    }
+                    if (has("string")) {
+                        return json(trimmed_value).dump();
+                    }
+                    // Unknown union types: fall through to generic inference below
+                } else if (t.is_string()) {
+                    std::string param_type = t;
+                    // Convert based on type
+                    if (param_type == "string" || param_type == "str" || param_type == "text") {
+                        // SECURITY FIX: Use nlohmann::json for proper escaping instead of manual concatenation
+                        return json(trimmed_value).dump();
+                    } else if (param_type == "integer" || param_type == "int") {
+                        int int_val;
+                        if (safe_parse_int(trimmed_value, int_val)) {
+                            return std::to_string(int_val);
+                        } else {
+                            // SECURITY FIX: Use proper JSON escaping for fallback string
+                            return json(trimmed_value).dump();
+                        }
+                    } else if (param_type == "number" || param_type == "float") {
+                        float float_val;
+                        if (safe_parse_float(trimmed_value, float_val)) {
+                            return std::to_string(float_val);
+                        } else {
+                            // SECURITY FIX: Use proper JSON escaping for fallback string
+                            return json(trimmed_value).dump();
+                        }
+                    } else if (param_type == "boolean" || param_type == "bool") {
+                        if (trimmed_value == "true" || trimmed_value == "false") {
+                            return trimmed_value;
+                        }
+                        return "false";
+                    } else if (param_type == "object" || param_type == "array") {
+                        try {
+                            auto parsed = json::parse(trimmed_value);
+                            return parsed.dump();
+                        } catch (...) {
+                            // SECURITY FIX: Use proper JSON escaping for fallback string
+                            return json(trimmed_value).dump();
+                        }
+                    }
                 }
-            } else if (param_type == "number" || param_type == "float") {
-                float float_val;
-                if (safe_parse_float(trimmed_value, float_val)) {
-                    return std::to_string(float_val);
-                } else {
-                    // SECURITY FIX: Use proper JSON escaping for fallback string
-                    return json(trimmed_value).dump();
-                }
-            } else if (param_type == "boolean" || param_type == "bool") {
-                if (trimmed_value == "true" || trimmed_value == "false") {
-                    return trimmed_value;
-                }
-                return "false";
-            } else if (param_type == "object" || param_type == "array") {
-                try {
-                    auto parsed = json::parse(trimmed_value);
-                    return parsed.dump();
-                } catch (...) {
-                    // SECURITY FIX: Use proper JSON escaping for fallback string
-                    return json(trimmed_value).dump();
-                }
+                // If schema.type exists but is not string/array, fall through
             }
         }
 
