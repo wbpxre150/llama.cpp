@@ -10,6 +10,7 @@
 #include <minja/minja.hpp>
 
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <optional>
@@ -931,15 +932,9 @@ static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) 
     // For now, use empty tools vector - we'll need to pass tools differently
     std::vector<common_chat_tool> empty_tools;
     if (builder.parse_qwen3_xml_tool_call(content, empty_tools)) {
-        // Only treat as parsed if at least one tool call was actually added.
-        // On malformed or incomplete XML, fall back to plain content.
-        const auto & parsed = builder.result();
-        if (parsed.tool_calls.empty() && parsed.content.empty()) {
-            builder.add_content(content);
-        }
+        // Successfully parsed XML tool call
         return;
     }
-
     // If no tool call found, treat as regular content
     builder.add_content(content);
 }
