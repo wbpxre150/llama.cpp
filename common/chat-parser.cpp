@@ -401,7 +401,7 @@ namespace {
     static constexpr size_t MAX_PARAMETER_COUNT = 100; // Maximum parameters per function
     static constexpr size_t MAX_TAG_NAME_LENGTH = 256; // Maximum tag name length
     static constexpr size_t MAX_ATTRIBUTE_LENGTH = 1024; // Maximum attribute length
-    
+
     // Helper function to set error details
     void set_error(common_chat_msg_parser::XmlParseError & error,
                    common_chat_msg_parser::XmlParseErrorType type,
@@ -413,16 +413,16 @@ namespace {
         error.context = context;
         error.message = message;
     }
-    
+
     // Simple XML tag parser - safer than regex, using string_view for performance
     struct XmlTag {
         std::string name;
         std::string attribute;
         std::string content;
-        size_t start_pos;
-        size_t end_pos;
+        size_t start_pos = 0;
+        size_t end_pos = 0;
     };
-    
+
     // Find XML tag with optional attribute - ITERATIVE implementation to avoid stack overflow
     std::optional<XmlTag> find_xml_tag(std::string_view text, std::string_view tag_name, size_t start_pos = 0,
                                        common_chat_msg_parser::XmlParseError * error = nullptr) {
@@ -436,7 +436,7 @@ namespace {
             }
             return std::nullopt;
         }
-        
+
         if (tag_name.size() > MAX_TAG_NAME_LENGTH) {
             LOG_DBG("Tag name too long: %zu chars (max: %zu)\n", tag_name.size(), MAX_TAG_NAME_LENGTH);
             if (error) {
@@ -446,16 +446,16 @@ namespace {
             }
             return std::nullopt;
         }
-        
+
         if (start_pos >= text.size()) {
             return std::nullopt;
         }
-        
+
         // PERFORMANCE OPTIMIZATION: Use string_view to avoid allocations
         // Pre-compute tag patterns
         const std::string open_tag_start = std::string("<") + std::string(tag_name);
         const std::string close_tag = std::string("</") + std::string(tag_name) + ">";
-        
+
         // ITERATIVE search to avoid recursion and potential stack overflow
         size_t search_pos = start_pos;
         while (search_pos < text.size()) {
@@ -464,7 +464,7 @@ namespace {
             if (open_pos == std::string::npos) {
                 return std::nullopt;
             }
-            
+
             // Validate that this is actually the start of our tag (not a substring)
             // Check that the character after tag name is either '>' or '=' or whitespace
             size_t check_pos = open_pos + open_tag_start.length();
@@ -477,16 +477,16 @@ namespace {
                     continue;
                 }
             }
-            
+
             // Find the end of the opening tag
             size_t open_end = text.find('>', open_pos);
             if (open_end == std::string::npos) {
                 return std::nullopt;
             }
-            
+
             XmlTag tag;
             tag.start_pos = open_pos;
-            
+
             // Extract attribute if present (for tags like <function=name> or <function = "name">)
             // PERFORMANCE: Use string_view for substring operations
             size_t tag_content_start = open_pos + 1 + tag_name.length();
@@ -499,15 +499,15 @@ namespace {
                     while (attr_start < open_end && std::isspace(text[attr_start])) {
                         attr_start++;
                     }
-                    
+
                     if (attr_start < open_end) {
                         size_t attr_end = open_end;
-                        
+
                         // Handle quoted attribute values
                         if (text[attr_start] == '"' || text[attr_start] == '\'') {
                             char quote_char = text[attr_start];
                             attr_start++; // Skip opening quote
-                            
+
                             // Find closing quote
                             size_t quote_end = text.find(quote_char, attr_start);
                             if (quote_end != std::string::npos && quote_end < open_end) {
@@ -522,7 +522,7 @@ namespace {
                                 attr_end--;
                             }
                         }
-                        
+
                         if (attr_start < attr_end) {
                             std::string_view attr_view = text.substr(attr_start, attr_end - attr_start);
                             // Validate attribute length
@@ -541,16 +541,16 @@ namespace {
                     }
                 }
             }
-            
+
             // Look for closing tag - PERFORMANCE: Search from after opening tag
             size_t close_pos = text.find(close_tag, open_end + 1);
             if (close_pos == std::string::npos) {
-                return std::nullopt;
+                return tag;
             }
-            
+
             tag.end_pos = close_pos + close_tag.length();
             tag.name = std::string(tag_name);
-            
+
             // PERFORMANCE: Use string_view for content extraction
             size_t content_start = open_end + 1;
             size_t content_length = close_pos - content_start;
@@ -558,20 +558,20 @@ namespace {
                 std::string_view content_view = text.substr(content_start, content_length);
                 tag.content = std::string(content_view);
             }
-            
+
             return tag;
         }
-        
+
         return std::nullopt;
     }
-    
+
     // Find all XML tags with a specific name and attribute pattern - with limits, using string_view
     std::vector<XmlTag> find_all_xml_tags(std::string_view text, std::string_view tag_name,
                                           common_chat_msg_parser::XmlParseError * error = nullptr) {
         std::vector<XmlTag> tags;
         size_t pos = 0;
         size_t tag_count = 0;
-        
+
         while (pos < text.length() && tag_count < MAX_PARAMETER_COUNT) {
             auto tag = find_xml_tag(text, tag_name, pos, error);
             if (!tag) {
@@ -581,7 +581,7 @@ namespace {
             pos = tag->end_pos;
             ++tag_count;
         }
-        
+
         if (tag_count >= MAX_PARAMETER_COUNT) {
             LOG_DBG("Too many tags found: %zu (max: %zu)\n", tag_count, MAX_PARAMETER_COUNT);
             if (error) {
@@ -590,10 +590,10 @@ namespace {
                          "Too many " + std::string(tag_name) + " tags found (max: " + std::to_string(MAX_PARAMETER_COUNT) + ")");
             }
         }
-        
+
         return tags;
     }
-    
+
     // Trim whitespace from string using string_view for performance
     std::string trim_whitespace(std::string_view str) {
         size_t start = str.find_first_not_of(" \t\n\r");
@@ -603,7 +603,7 @@ namespace {
         size_t end = str.find_last_not_of(" \t\n\r");
         return std::string(str.substr(start, end - start + 1));
     }
-    
+
     // Safe integer parsing with overflow protection using string_view
     bool safe_parse_int(std::string_view str, int & result) {
         try {
@@ -619,7 +619,7 @@ namespace {
             return false;
         }
     }
-    
+
     // Safe float parsing with overflow protection using string_view
     bool safe_parse_float(std::string_view str, float & result) {
         try {
@@ -634,14 +634,14 @@ namespace {
             return false;
         }
     }
-    
+
     // Convert parameter value based on tool schema type - FIXED JSON injection vulnerability, using string_view
     std::string convert_qwen3_param_value(std::string_view param_value,
                                          std::string_view param_name,
                                          const nlohmann::json & param_config,
                                          std::string_view /* func_name */) {
         std::string trimmed_value = trim_whitespace(param_value);
-        
+
         // Handle null value
         if (trimmed_value == "null") {
             return "null";
@@ -689,7 +689,7 @@ namespace {
                 }
             }
         }
-        
+
         // Without schema, try to infer type from value
         // First check if it's valid JSON (object or array)
         try {
@@ -698,23 +698,23 @@ namespace {
         } catch (...) {
             // Not valid JSON, continue with other type checks
         }
-        
+
         // Check if it's a number
         int int_val;
         if (safe_parse_int(trimmed_value, int_val)) {
             return std::to_string(int_val); // It's an integer
         }
-        
+
         float float_val;
         if (safe_parse_float(trimmed_value, float_val)) {
             return std::to_string(float_val); // It's a float
         }
-        
+
         // Check if it's a boolean
         if (trimmed_value == "true" || trimmed_value == "false") {
             return trimmed_value;
         }
-        
+
         // Default to string - SECURITY FIX: Use proper JSON escaping
         return json(trimmed_value).dump();
     }
@@ -752,7 +752,7 @@ bool common_chat_msg_parser::parse_qwen3_xml_tool_call(const std::string & conte
                                                        XmlParseError & error) {
     // Clear any previous error
     error.clear();
-    
+
     // Input validation for DoS protection
     if (content.size() > MAX_INPUT_SIZE) {
         LOG_DBG("XML content too large: %zu bytes (max: %zu)\n", content.size(), MAX_INPUT_SIZE);
@@ -761,7 +761,7 @@ bool common_chat_msg_parser::parse_qwen3_xml_tool_call(const std::string & conte
                  "XML content exceeds maximum size limit of " + std::to_string(MAX_INPUT_SIZE) + " bytes");
         return false;
     }
-    
+
     // Validate tools vector size
     if (tools.size() > MAX_PARAMETER_COUNT) {
         LOG_DBG("Too many tools provided: %zu (max: %zu)\n", tools.size(), MAX_PARAMETER_COUNT);
@@ -801,6 +801,10 @@ bool common_chat_msg_parser::parse_qwen3_xml_tool_call(const std::string & conte
         }
     }
 
+    if (!tool_call_tag->end_pos) {
+        return true;
+    }
+
     // Find function tag within tool_call - use string_view for performance
     std::string_view tool_call_content_view(tool_call_tag->content);
     auto function_tag = find_xml_tag(tool_call_content_view, "function", 0, &error);
@@ -815,7 +819,7 @@ bool common_chat_msg_parser::parse_qwen3_xml_tool_call(const std::string & conte
     }
 
     std::string function_name = trim_whitespace(function_tag->attribute);
-    
+
     // Validate function name
     if (function_name.empty() || function_name.size() > MAX_TAG_NAME_LENGTH) {
         LOG_DBG("Invalid function name: '%s' (length: %zu, max: %zu)\n",
@@ -826,7 +830,7 @@ bool common_chat_msg_parser::parse_qwen3_xml_tool_call(const std::string & conte
                  "Invalid function name: '" + function_name + "' (length: " + std::to_string(function_name.size()) + ", max: " + std::to_string(MAX_TAG_NAME_LENGTH) + ")");
         return false;
     }
-    
+
     // PERFORMANCE OPTIMIZATION: Use hash set for O(1) function lookup instead of O(n) loop
     if (!tools.empty() && valid_functions.find(function_name) == valid_functions.end()) {
         LOG_DBG("Function '%s' not found in available tools\n", function_name.c_str());
@@ -836,7 +840,7 @@ bool common_chat_msg_parser::parse_qwen3_xml_tool_call(const std::string & conte
                  "Function '" + function_name + "' not found in available tools");
         return false;
     }
-    
+
     // Get parameter configuration for this function - use string_view
     auto param_config = get_param_config(std::string_view(function_name), tools);
 
@@ -844,12 +848,12 @@ bool common_chat_msg_parser::parse_qwen3_xml_tool_call(const std::string & conte
     json arguments = json::object();
     std::string_view function_content_view(function_tag->content);
     auto parameter_tags = find_all_xml_tags(function_content_view, "parameter", &error);
-    
+
     // Check if error occurred during parameter parsing
     if (error.has_error()) {
         return false;
     }
-    
+
     // Limit parameter count for DoS protection
     size_t param_count = 0;
     for (const auto & param_tag : parameter_tags) {
@@ -862,22 +866,22 @@ bool common_chat_msg_parser::parse_qwen3_xml_tool_call(const std::string & conte
                      "Too many parameters for function '" + function_name + "': " + std::to_string(param_count) + " (max: " + std::to_string(MAX_PARAMETER_COUNT) + ")");
             break;
         }
-        
+
         if (param_tag.attribute.empty()) {
             LOG_DBG("Skipping parameter with empty attribute\n");
             continue; // Skip malformed parameter tags
         }
-        
+
         std::string param_name = trim_whitespace(param_tag.attribute);
         std::string param_value = param_tag.content;
-        
+
         // Validate parameter name
         if (param_name.empty() || param_name.size() > MAX_TAG_NAME_LENGTH) {
             LOG_DBG("Invalid parameter name: '%s' (length: %zu, max: %zu)\n",
                     param_name.c_str(), param_name.size(), MAX_TAG_NAME_LENGTH);
             continue;
         }
-        
+
         // Convert value based on schema type - use string_view for performance
         try {
             std::string converted_value = convert_qwen3_param_value(

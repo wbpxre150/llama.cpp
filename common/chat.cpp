@@ -926,7 +926,7 @@ static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) 
     }
 
     std::string content = builder.consume_rest();
-    
+
     // Try to parse Qwen3-Coder XML format
     // For now, use empty tools vector - we'll need to pass tools differently
     std::vector<common_chat_tool> empty_tools;
@@ -934,7 +934,7 @@ static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) 
         // Successfully parsed XML tool call
         return;
     }
-    
+
     // If no tool call found, treat as regular content
     builder.add_content(content);
 }
@@ -2083,63 +2083,71 @@ static void common_chat_parse_granite(common_chat_msg_parser & builder) {
 static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-    
+
     // Always set the format to QWEN3_CODER_XML regardless of whether tools are provided
     // The format identifies the template type, not the runtime configuration
     data.format = COMMON_CHAT_FORMAT_QWEN3_CODER_XML;
-    
+
     if (!inputs.tools.empty()) {
         data.grammar = build_grammar([&](const common_grammar_builder & builder) {
             std::vector<std::string> tool_rules;
-            std::vector<std::string> escaped_names;
-            
+
+            auto not_parameter_end = builder.add_rule("not_parameter_end", "([^<] | (\"<\" [^/]) | (\"</\" [^p]) | (\"</p\" [^a]) | (\"</pa\" [^r]) | (\"</par\" [^a]) | (\"</para\" [^m]) | (\"</param\" [^e]) | (\"</parame\" [^t]) | (\"</paramet\" [^e]) | (\"</paramete\" [^r]) | (\"</parameter\" [^>]))*");
+
             foreach_function(inputs.tools, [&](const json & tool) {
                 const auto & function = tool.at("function");
                 const std::string & name = function.at("name");
                 const json & parameters = function.at("parameters");
-                
-                escaped_names.push_back(regex_escape(name));
-                
+
+                std::unordered_set<std::string> required;
+                if (parameters.contains("required")) {
+                    for (const auto & p : parameters.at("required")) {
+                        required.insert(p);
+                    }
+                }
+
                 // Build parameter rules for XML format
                 std::vector<std::string> param_rules;
                 if (parameters.contains("properties")) {
                     for (const auto & [param_name, param_schema] : parameters["properties"].items()) {
                         std::string param_rule = "\"<parameter=" + param_name + ">\" space ";
-                        
+
                         // Add parameter value based on type
                         if (param_schema.contains("type")) {
                             std::string param_type = param_schema["type"];
                             if (param_type == "string") {
-                                param_rule += "[^<]* ";
-                            } else if (param_type == "integer" || param_type == "number") {
-                                param_rule += "[0-9.-]+ ";
-                            } else if (param_type == "boolean") {
-                                param_rule += "(\"true\" | \"false\") ";
+                                param_rule += not_parameter_end + " ";
                             } else {
-                                param_rule += "[^<]* ";
+                                param_rule += builder.add_schema(name + "-parameter-" + param_name, param_schema);
                             }
                         } else {
-                            param_rule += "[^<]* ";
+                            param_rule += builder.add_schema(name + "-parameter-" + param_name, param_schema);
                         }
-                        
+
                         param_rule += "\"</parameter>\" space";
+
+                        // Parameter is optional
+                        if (required.find(param_name) == required.end()) {
+                            param_rule = "(" + param_rule + ")? ";
+                        }
+
                         param_rules.push_back(param_rule);
                     }
                 }
-                
+
                 std::string function_content = param_rules.empty() ? "space" : string_join(param_rules, " ");
                 tool_rules.push_back(builder.add_rule(name + "-call",
                     "\"<tool_call>\" space \"<function=" + name + ">\" space " +
                     function_content + " \"</function>\" space \"</tool_call>\" space"));
             });
-            
+
             auto tool_call = builder.add_rule("tool_call", string_join(tool_rules, " | "));
             builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
-            
+
             data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
             data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
         });
-        
+
         data.preserved_tokens = {
             "<tool_call>",
             "</tool_call>",
@@ -2149,7 +2157,7 @@ static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_c
             "</parameter>",
         };
     }
-    
+
     data.prompt = apply(tmpl, inputs);
     return data;
 }
@@ -2231,7 +2239,7 @@ static common_chat_params common_chat_templates_apply_jinja(
         src.find("<function=...></function> block must be nested within <tool_call></tool_call>") != std::string::npos) {
         return common_chat_params_init_qwen3_coder_xml(tmpl, params);
     }
-      
+
     // Granite (IBM) - detects thinking / tools support
     if (src.find("elif thinking") != std::string::npos && src.find("<|tool_call|>") != std::string::npos) {
         return common_chat_params_init_granite(tmpl, params);
