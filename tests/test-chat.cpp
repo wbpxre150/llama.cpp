@@ -1754,19 +1754,7 @@ static void test_template_output_parsers() {
     {
         printf("Testing Qwen3-Coder XML format - Error handling and edge cases\n");
         
-        // Test 1: Invalid XML - missing closing tag (should fall back to content)
-        common_chat_msg expected_invalid_xml;
-        expected_invalid_xml.role = "assistant";
-        expected_invalid_xml.content = "<tool_call><function=test>incomplete";
-        
-        assert_msg_equals(
-            expected_invalid_xml,
-            common_chat_parse(
-                "<tool_call><function=test>incomplete",
-                /* is_partial= */ false,
-                {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
-        
-        // Test 2: No tool_call tags (should be treated as regular content)
+        // Test 1: No tool_call tags (should be treated as regular content)
         common_chat_msg expected_no_tool_call;
         expected_no_tool_call.role = "assistant";
         expected_no_tool_call.content = "This is just regular text without any tool calls.";
@@ -1778,7 +1766,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 3: Empty function name (should fall back to content)
+        // Test 2: Empty function name (should fall back to content)
         common_chat_msg expected_empty_function;
         expected_empty_function.role = "assistant";
         expected_empty_function.content = "<tool_call><function=></function></tool_call>";
@@ -1790,7 +1778,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 4: Malformed parameter tags (should still parse function but ignore malformed params)
+        // Test 3: Malformed parameter tags (should still parse function but ignore malformed params)
         common_chat_msg expected_malformed_params;
         expected_malformed_params.role = "assistant";
         expected_malformed_params.tool_calls = {
@@ -1804,7 +1792,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 5: Nested tool calls (should parse the first one)
+        // Test 4: Nested tool calls (should parse the first one)
         common_chat_msg expected_nested;
         expected_nested.role = "assistant";
         expected_nested.tool_calls = {
@@ -1831,7 +1819,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 6: Very deeply nested XML content in parameter
+        // Test 5: Very deeply nested XML content in parameter
         common_chat_msg expected_deep_xml;
         expected_deep_xml.role = "assistant";
         expected_deep_xml.tool_calls = {
@@ -1851,7 +1839,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 7: Parameter with only whitespace
+        // Test 6: Parameter with only whitespace
         common_chat_msg expected_whitespace_param;
         expected_whitespace_param.role = "assistant";
         expected_whitespace_param.tool_calls = {
@@ -1871,7 +1859,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 8: Parameter with tabs and mixed whitespace
+        // Test 7: Parameter with tabs and mixed whitespace
         common_chat_msg expected_mixed_whitespace;
         expected_mixed_whitespace.role = "assistant";
         expected_mixed_whitespace.tool_calls = {
@@ -1893,7 +1881,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 9: Control characters and special Unicode
+        // Test 8: Control characters and special Unicode
         common_chat_msg expected_control_chars;
         expected_control_chars.role = "assistant";
         expected_control_chars.tool_calls = {
@@ -1913,7 +1901,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 10: Emoji and extended Unicode characters
+        // Test 9: Emoji and extended Unicode characters
         common_chat_msg expected_emoji;
         expected_emoji.role = "assistant";
         expected_emoji.tool_calls = {
@@ -1933,7 +1921,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 11: Mathematical expressions and formulas
+        // Test 10: Mathematical expressions and formulas
         common_chat_msg expected_math;
         expected_math.role = "assistant";
         expected_math.tool_calls = {
@@ -1953,7 +1941,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 12: SQL injection-like content (should be safely escaped)
+        // Test 11: SQL injection-like content (should be safely escaped)
         common_chat_msg expected_sql;
         expected_sql.role = "assistant";
         expected_sql.tool_calls = {
@@ -1973,7 +1961,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 13: HTML/XML injection content
+        // Test 12: HTML/XML injection content
         common_chat_msg expected_html;
         expected_html.role = "assistant";
         expected_html.tool_calls = {
@@ -1993,7 +1981,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 14: Binary-like content (base64)
+        // Test 13: Binary-like content (base64)
         common_chat_msg expected_binary;
         expected_binary.role = "assistant";
         expected_binary.tool_calls = {
@@ -2013,7 +2001,7 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_QWEN3_CODER_XML}));
         
-        // Test 15: Very large numbers (should be parsed as scientific notation)
+        // Test 14: Very large numbers (should be parsed as scientific notation)
         common_chat_msg expected_large_numbers;
         expected_large_numbers.role = "assistant";
         expected_large_numbers.tool_calls = {

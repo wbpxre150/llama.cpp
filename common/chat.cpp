@@ -2124,7 +2124,7 @@ static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_c
                             param_rule += builder.add_schema(name + "-parameter-" + param_name, param_schema);
                         }
 
-                        param_rule += " \"</parameter>\" space";
+                        param_rule += "\"</parameter>\" space";
 
                         // Parameter is optional
                         if (required.find(param_name) == required.end()) {
