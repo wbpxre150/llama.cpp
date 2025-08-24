@@ -2270,6 +2270,7 @@ static void test_template_output_parsers() {
                     /* .reasoning_format = */ COMMON_REASONING_FORMAT_AUTO,
                 }));
     }
+    }
 }
 
 
