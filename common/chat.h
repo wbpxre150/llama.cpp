@@ -112,6 +112,7 @@ enum common_chat_format {
     COMMON_CHAT_FORMAT_QWEN3_CODER_XML,
     COMMON_CHAT_FORMAT_GRANITE,
     COMMON_CHAT_FORMAT_GPT_OSS,
+    COMMON_CHAT_FORMAT_SEED_OSS,
 
     COMMON_CHAT_FORMAT_COUNT, // Not a format, just the # formats
 };
