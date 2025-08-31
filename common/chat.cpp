@@ -2226,6 +2226,11 @@ static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_c
 }
 
 static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
+
     std::string content = builder.consume_rest();
 
     // Try to parse Qwen3-Coder XML format
