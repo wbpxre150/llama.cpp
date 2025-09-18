@@ -75,6 +75,8 @@
 #define GGML_CUDA_CC_IS_RDNA4(cc) (cc >= GGML_CUDA_CC_RDNA4)
 #define GGML_CUDA_CC_IS_GCN(cc)   (cc > GGML_CUDA_CC_OFFSET_AMD && cc < GGML_CUDA_CC_CDNA1)
 #define GGML_CUDA_CC_IS_CDNA(cc)  (cc >= GGML_CUDA_CC_CDNA1 && cc < GGML_CUDA_CC_RDNA1)
+#define GGML_CUDA_CC_IS_CDNA1(cc) (cc >= GGML_CUDA_CC_CDNA1 && cc < GGML_CUDA_CC_CDNA2)
+#define GGML_CUDA_CC_IS_CDNA2(cc) (cc >= GGML_CUDA_CC_CDNA2 && cc < GGML_CUDA_CC_CDNA3)
 #define GGML_CUDA_CC_IS_CDNA3(cc) (cc >= GGML_CUDA_CC_CDNA3 && cc < GGML_CUDA_CC_RDNA1)
 
 // Moore Threads
@@ -325,6 +327,20 @@ static constexpr __device__ int ggml_cuda_get_physical_warp_size() {
 #endif // defined(GGML_USE_HIP) && (defined(__GFX9__) || defined(__GFX8__))
 }
 
+// Maximum number of bytes that can be copied in a single instruction.
+static constexpr __device__ int ggml_cuda_get_max_cpy_bytes() {
+#ifdef GGML_USE_HIP
+    return 16;
+#else
+#if __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
+    return 16;
+#else
+    return 8;
+#endif // __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
+#endif // GGML_USE_HIP
+}
+
+
 [[noreturn]]
 static __device__ void no_device_code(
     const char * file_name, const int line, const char * function_name, const int arch, const char * arch_list) {
@@ -543,6 +559,45 @@ static __device__ __forceinline__ int ggml_cuda_dp4a(const int a, const int b, i
 #endif // __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A || defined(GGML_USE_MUSA)
 
 #endif // defined(GGML_USE_HIP)
+}
+
+static __device__ __forceinline__ void ggml_cuda_mad(float & acc, const float v, const float u) {
+    acc += v*u;
+}
+
+static __device__ __forceinline__ void ggml_cuda_mad(float & acc, const float2 v, const float2 u) {
+    acc += v.x*u.x;
+    acc += v.y*u.y;
+}
+
+static __device__ __forceinline__ void ggml_cuda_mad(float & acc, const half2 v, const half2 u) {
+#if defined(GGML_USE_HIP) && (defined(RDNA2) || defined(RDNA3) || defined(RDNA4) || defined(__gfx906__) || defined(CDNA))
+    asm volatile("v_dot2_f32_f16 %0, %1, %2, %0" : "+v"(acc) : "v"(v), "v"(u));
+#else
+#ifdef FAST_FP16_AVAILABLE
+    const float2 tmp = __half22float2(v*u);
+    acc += tmp.x + tmp.y;
+#else
+    const float2 tmpv = __half22float2(v);
+    const float2 tmpu = __half22float2(u);
+    acc += tmpv.x * tmpu.x;
+    acc += tmpv.y * tmpu.y;
+#endif // FAST_FP16_AVAILABLE
+#endif // defined(GGML_USE_HIP) && (defined(RDNA2)  || defined(RDNA3) || defined(RDNA4) || defined(GCN5) || defined(CDNA))
+}
+
+// Aligned memory transfers of 8/16 bytes can be faster than 2 transfers with 4 bytes, especially on AMD.
+template <int nbytes>
+static __device__ __forceinline__ void ggml_cuda_memcpy_1(void * __restrict__ dst, const void * __restrict__ src) {
+    if constexpr (nbytes == 4) {
+        *(int *) dst = *(const int *) src;
+    } else if constexpr (nbytes == 8) {
+        *(int2 *) dst = *(const int2 *) src;
+    } else if constexpr (nbytes == 16) {
+        *(int4 *) dst = *(const int4 *) src;
+    } else {
+        static_assert(nbytes == 0 && nbytes == -1, "bad nbytes");
+    }
 }
 
 static __device__ __forceinline__ float ggml_cuda_e8m0_to_fp32(uint8_t x) {
